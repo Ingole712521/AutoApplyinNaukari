@@ -54,6 +54,29 @@ naukri-api-client/
 
 ---
 
+## ⚠️ IP & Hosting Advice
+
+Naukri fingerprints IPs for every request. Many cloud providers trigger MFA or get blocked.
+
+**Avoid:**
+- Azure (all regions)
+- GitHub Actions / CI
+- Some Google Cloud regions
+- Datacenter IP ranges
+
+**Works:**
+- AWS (EC2 with Elastic IP)
+- Home broadband / personal IP (best)
+- Mobile hotspot (testing)
+- Residential proxy
+
+**Note:**
+- Sessions are IP-bound — changing IP will invalidate login
+- Avoid GitHub Actions completely (IP pool is flagged)
+
+
+
+
 ## ⚙️ Installation
 
 **Requirements:** Python 3.10+
