@@ -115,6 +115,7 @@ class NaukriJobClient:
             raise NaukriAuthError("Login required")
 
         self._session = login_client.session
+        # self._session = login_client.session if login_client else None
         self._client = login_client
 
         self.pool_idx = 0
@@ -219,6 +220,61 @@ class NaukriJobClient:
     # ------------------------------------------------------------------
     # Apply Job
     # ------------------------------------------------------------------
+
+
+    # ------------------------------------------------------------------
+# Get Job Details
+# ------------------------------------------------------------------
+    def get_job_details(self, job_id: str, sid: str = ""):
+        if not job_id:
+            raise ValueError("job_id is required")
+
+        if not sid:
+            sid = datetime.utcnow().strftime("%Y%m%d%H%M%S") + "0000000"
+
+        url = f"https://www.naukri.com/jobapi/v4/job/{job_id}"
+
+        params = {
+            "microsite": "y",
+            "src": "jobsearchDesk",
+            "sid": sid,
+            "xp": "1",
+            "px": "1",
+        }
+
+        headers = self._client._build_headers(auth=True)
+        headers["nkparam"] = self._get_nkparam()
+        headers.update({
+        "appid": "109",
+        "systemid": "jobseeker",
+        "clientid": "d3skt0p",
+        "accept": "application/json",
+        "referer": "https://www.naukri.com/",
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+    })
+        headers["systemid"] = "Naukri"
+        headers["appid"] = "121"
+        logger.debug("Fetching job details for job_id=%s sid=%s", job_id, sid)
+
+        res = self._session.get(url, headers=headers, params=params)
+
+        if res.status_code in (401, 403):
+            try:
+                msg = res.json().get("message", "Auth failed")
+            except Exception:
+                msg = res.text
+            raise NaukriAuthError(msg)
+
+        if not res.ok:
+            raise NaukriParseError(f"Job details fetch failed: {res.status_code} — {res.text}")
+
+        try:
+            return res.json()
+        except Exception:
+            raise NaukriParseError(f"Invalid JSON response: {res.text}")
+
     def apply_job(
         self,
         job: Job,
@@ -313,6 +369,120 @@ class NaukriJobClient:
     # ------------------------------------------------------------------
     # Search jobs
     # ------------------------------------------------------------------
+    
+
+
+    def handle_static_questionnaire_and_apply(
+        self,
+        job,
+        questionnaire,
+        sid,
+        mandatory_skills=None,
+        optional_skills=None,
+        source="recommended"
+    ):
+        import re
+
+        # 🔹 You can tweak these values anytime
+        PROFILE = {
+            "current_ctc": "5",
+            "expected_ctc": "7",
+            "default_exp": "2",
+            "notice_period": "30"
+        }
+
+        def smart_answer(question, qtype, options):
+            q = question.lower()
+
+            # ---------------- TEXT BOX ----------------
+            if qtype == "Text Box":
+
+                if "current ctc" in q:
+                    return PROFILE["current_ctc"]
+
+                if "expected ctc" in q:
+                    return PROFILE["expected_ctc"]
+
+                if "experience" in q:
+                    if "node" in q:
+                        return "2"
+                    if "python" in q:
+                        return "1"
+                    return PROFILE["default_exp"]
+
+                if "notice" in q:
+                    return PROFILE["notice_period"]
+
+                return "1"  # safe fallback
+
+            # ---------------- RADIO BUTTON ----------------
+            if qtype == "Radio Button":
+                for key, val in options.items():
+                    val_lower = val.lower()
+
+                    if any(k in val_lower for k in ["yes", "willing", "open"]):
+                        return key
+
+                # fallback → first option
+                return list(options.keys())[0] if options else None
+
+            return None
+
+        # ---------------- BUILD ANSWERS ----------------
+        answers = {}
+
+        for q in questionnaire:
+            qid = q.get("questionId")
+            qtext = q.get("questionName") or ""
+            qtype = q.get("questionType")
+            options = q.get("answerOption") or {}
+
+            ans = smart_answer(qtext, qtype, options)
+
+            if ans is not None:
+                answers[qid] = ans
+
+        logger.debug("Generated answers: %s", answers)
+
+        # ---------------- FINAL APPLY ----------------
+        apply_src, logstr_template = APPLY_SRC_MAP.get(source, APPLY_SRC_MAP["recommended"])
+        logstr = logstr_template.format(sid=sid)
+
+        payload = {
+            "strJobsarr": [job.job_id],
+            "logstr": logstr,
+            "flowtype": "show",
+            "crossdomain": True,
+            "jquery": 1,
+            "rdxMsgId": "",
+            "chatBotSDK": True,
+            "mandatory_skills": mandatory_skills or [],
+            "optional_skills": optional_skills or [],
+            "applyTypeId": "107",
+            "closebtn": "y",
+            "applySrc": apply_src,
+            "sid": sid,
+            "mid": "",
+            "applyData": {
+                job.job_id: {
+                    "answers": answers
+                }
+            }
+        }
+
+        headers = self._client._build_headers(auth=True)
+        res = self._session.post(APPLY_JOB_URL, headers=headers, json=payload)
+
+        if not res.ok:
+            logger.debug("Apply failed: %s", res.text)
+            return {"success": False, "error": res.text}
+
+        try:
+            return res.json()
+        except Exception:
+            return {"success": False, "error": "Invalid JSON response"}
+    
+
 
     def search_jobs(
         self,
