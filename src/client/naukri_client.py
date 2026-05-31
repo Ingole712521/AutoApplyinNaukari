@@ -8,6 +8,12 @@ from src.config.constants import *
 from src.exceptions.exceptions import *
 from src.models.models import *
 from src.utils.extractors import extract_form_key2, extract_all_js_urls
+from src.utils.cookie_auth import (
+    apply_cookies_to_session,
+    cookies_to_dict,
+    get_nauk_at_token,
+    load_cookies,
+)
 import requests
 from src.utils.request_helper import with_exponential_retry
 logger = logging.getLogger(__name__)
@@ -99,13 +105,37 @@ OTP_HEADERS = {
 
 class NaukriLoginClient:
 
-    def __init__(self, username, password):
+    def __init__(self, username=None, password=None):
         self.username = username
         self.password = password
         self.session = build_session()
         self.naukri_session = None
         self.profile_id = None
         self.cache = {}
+
+    def _extract_bearer_token(self) -> str | None:
+        token = get_nauk_at_token(self.session)
+        if token:
+            return token
+        cookies = self.session.cookies
+        if hasattr(cookies, "get"):
+            return cookies.get("nauk_at")
+        return None
+
+    def _finalize_session(self, token: str, cookie_source) -> NaukriSession:
+        if isinstance(cookie_source, list):
+            cookie_map = cookies_to_dict(cookie_source)
+        elif hasattr(cookie_source, "get"):
+            cookie_map = dict(cookie_source)
+        else:
+            cookie_map = {}
+
+        self.naukri_session = NaukriSession(token, cookie_map)
+        try:
+            self.cache["form_key"] = self.get_form_key2()
+        except Exception:
+            pass
+        return self.naukri_session
 
     def _build_headers(self, auth=False, extra=None):
         headers = DEFAULT_HEADERS.copy()
@@ -132,17 +162,42 @@ class NaukriLoginClient:
         )
 
     def login(self):
+        if not self.username or not self.password:
+            raise NaukriAuthError("Username and password required for password login")
+
         res = self._login_request()
 
         if not res.ok:
             print(res.content)
             raise NaukriAuthError("Login failed")
 
-        token = self.session.cookies.get("nauk_at")
+        token = self._extract_bearer_token()
         if not token:
             raise NaukriAuthError("No token")
 
-        self.naukri_session = NaukriSession(token, self.session.cookies)
+        return self._finalize_session(token, self.session.cookies)
+
+    def login_from_cookies(self, cookies_path: str) -> NaukriSession:
+        """
+        Restore a session saved after Google (or browser) sign-in.
+        Run google_login.py once to create the cookie file.
+        """
+        cookies = load_cookies(cookies_path)
+        apply_cookies_to_session(self.session, cookies)
+
+        token = self._extract_bearer_token()
+        if not token:
+            raise NaukriAuthError(
+                f"No nauk_at cookie in {cookies_path}. Run: python google_login.py"
+            )
+
+        self.naukri_session = NaukriSession(token, cookies_to_dict(cookies))
+
+        if not self._validate_session():
+            self.naukri_session = None
+            raise NaukriAuthError(
+                "Saved session expired. Run: python google_login.py"
+            )
 
         try:
             self.cache["form_key"] = self.get_form_key2()
@@ -150,6 +205,18 @@ class NaukriLoginClient:
             pass
 
         return self.naukri_session
+
+    def _validate_session(self) -> bool:
+        try:
+            res = self.session.get(
+                DASHBOARD_URL,
+                headers=self._build_headers(auth=True),
+            )
+            return res.status_code == 200
+        except NaukriAuthError:
+            return False
+        except Exception:
+            return False
 
     # ------------------------------------------------------------------
     # form_key helpers
@@ -198,7 +265,7 @@ class NaukriLoginClient:
             logger.error("OTP verification failed: %s %s", res.status_code, res.text)
             raise NaukriAuthError(f"OTP verification failed ({res.status_code})")
 
-        token = self.session.cookies.get("nauk_at")
+        token = self._extract_bearer_token()
         if not token:
             # Some flows return the token in the JSON body instead
             try:
@@ -209,14 +276,7 @@ class NaukriLoginClient:
         if not token:
             raise NaukriAuthError("OTP verified but no auth token received")
 
-        self.naukri_session = NaukriSession(token, self.session.cookies)
-
-        try:
-            self.cache["form_key"] = self.get_form_key2()
-        except Exception:
-            pass
-
-        return self.naukri_session
+        return self._finalize_session(token, self.session.cookies)
 
 
     @with_exponential_retry(label="send_otp")

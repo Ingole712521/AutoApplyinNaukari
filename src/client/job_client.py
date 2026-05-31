@@ -6,8 +6,10 @@ from src.client.naukri_client import NaukriLoginClient
 from src.exceptions.exceptions import NaukriAuthError, NaukriParseError
 from src.utils.request_helper import with_exponential_retry
 from src.utils.nkparam_generator import generate_nkparam
+from src.utils.formatters import format_salary
 from src.config.constants import RECOMMENDED_JOBS_URL, JOB_SEARCH_URL, APPLY_JOB_URL
 import json
+from config import APPLICANT_PROFILE
 
 
 logger = logging.getLogger(__name__)
@@ -135,7 +137,7 @@ class NaukriJobClient:
             company=raw.get("companyName") or raw.get("company") or "N/A",
             location=location,
             experience=raw.get("experienceText") or raw.get("experience") or "N/A",
-            salary=raw.get("salaryDetail") or raw.get("salary") or "Not disclosed",
+            salary=format_salary(raw.get("salaryDetail") or raw.get("salary")),
             posted_date=raw.get("footerPlaceholderLabel") or raw.get("postedDate") or "N/A",
             apply_link=raw.get("jdURL") or f"https://www.naukri.com/job-listings-{raw.get('jobId', '')}",
             description=raw.get("jobDescription") or "",
@@ -367,33 +369,31 @@ class NaukriJobClient:
         source="recommended",
     ) -> dict:
 
-        # Static profile values used when generating questionnaire answers.
-        # Update these to match the candidate's actual profile.
-        PROFILE = {
-            "current_ctc":  "5",
-            "expected_ctc": "7",
-            "exp_total":    "2",
-            "exp_node":     "2",
-            "exp_python":   "1",
-            "notice_days":  30,
-            "skills": [
-                "node", "docker", "kubernetes",
-                "aws", "ci/cd", "jenkins", "terraform",
-            ],
-        }
+        PROFILE = APPLICANT_PROFILE
+
+        def salary_answer(qtext: str, profile: dict, kind: str) -> str:
+            q = qtext.lower()
+            annual = profile["current_ctc_annual"] if kind == "current" else profile["expected_ctc_annual"]
+            if "lakh" in q or "lpa" in q:
+                return str(round(annual / 100000, 2))
+            return str(annual)
 
         def build_smart_answers(questionnaire: list, profile: dict) -> dict:
             answers = {}
 
             def pick_yes(options: dict) -> str:
-                # Prefer any option whose label contains "yes".
                 for k, v in options.items():
                     if "yes" in v.lower():
                         return k
                 return list(options.keys())[0]
 
+            def pick_no(options: dict) -> str:
+                for k, v in options.items():
+                    if "no" in v.lower():
+                        return k
+                return list(options.keys())[-1]
+
             def pick_notice(options: dict, notice_days: int) -> str:
-                # Match the closest notice period bucket to notice_days.
                 for k, v in options.items():
                     val = v.lower()
                     if "15" in val and notice_days <= 15:
@@ -404,6 +404,13 @@ class NaukriJobClient:
                         return k
                 return list(options.keys())[0]
 
+            def pick_location(options: dict, location: str) -> str:
+                loc = location.lower()
+                for k, v in options.items():
+                    if loc in v.lower():
+                        return k
+                return list(options.keys())[0]
+
             for q in questionnaire:
                 qid   = q["questionId"]
                 qtext = (q.get("questionName") or "").lower()
@@ -411,26 +418,27 @@ class NaukriJobClient:
                 options = q.get("answerOption") or {}
 
                 if qtype == "text box":
-                    if "current ctc" in qtext:
-                        ans = profile["current_ctc"]
-                    elif "expected ctc" in qtext:
-                        ans = profile["expected_ctc"]
-                    elif "experience" in qtext:
-                        if "node" in qtext:
-                            ans = profile["exp_node"]
-                        elif "python" in qtext:
-                            ans = profile["exp_python"]
-                        else:
-                            ans = profile["exp_total"]
+                    if "current ctc" in qtext or "current salary" in qtext:
+                        ans = salary_answer(qtext, profile, "current")
+                    elif "expected ctc" in qtext or "expected salary" in qtext:
+                        ans = salary_answer(qtext, profile, "expected")
+                    elif "experience" in qtext or "years" in qtext:
+                        ans = profile["exp_total"]
                     elif "notice" in qtext:
                         ans = str(profile["notice_days"])
+                    elif any(x in qtext for x in ["location", "city", "based in", "current city"]):
+                        ans = profile["current_location"]
                     else:
-                        ans = "1"
+                        ans = profile["exp_total"]
 
                 else:
                     if options:
-                        if "notice" in qtext:
+                        if "relocate" in qtext or "relocation" in qtext or "willing to move" in qtext:
+                            key = pick_yes(options) if profile.get("willing_to_relocate") else pick_no(options)
+                        elif "notice" in qtext:
                             key = pick_notice(options, profile["notice_days"])
+                        elif any(x in qtext for x in ["location", "city", "based"]):
+                            key = pick_location(options, profile["current_location"])
                         elif any(skill in qtext for skill in profile["skills"]):
                             key = pick_yes(options)
                         elif any(x in qtext for x in ["do you", "have you", "experience"]):
@@ -438,10 +446,9 @@ class NaukriJobClient:
                         else:
                             key = list(options.keys())[0]
 
-                        # Option-type answers must always be wrapped in a list.
                         ans = [key]
                     else:
-                        ans = "1"
+                        ans = profile["exp_total"]
 
                 answers[qid] = ans
 

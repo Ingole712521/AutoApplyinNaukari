@@ -15,6 +15,12 @@ venv/
 # Logs
 *.log
 
+# Auto-apply tracking
+applied_jobs.csv
+nkPool.txt
+naukri_cookies.json
+naukri_jobs.xlsx
+
 # OS files
 .DS_Store
 Thumbs.db
