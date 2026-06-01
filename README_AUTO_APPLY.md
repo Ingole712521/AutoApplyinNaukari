@@ -16,8 +16,10 @@ Automatically search **Naukri.com** and **LinkedIn** for React and DevOps roles,
 ### 1. Install Python 3.10+
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-local.txt
 ```
+
+(`requirements-local.txt` adds Selenium for LinkedIn on your PC. Vercel uses `requirements.txt` only.)
 
 ### 2. OpenRouter API key (LinkedIn form questions)
 

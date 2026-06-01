@@ -1,0 +1,3 @@
+# Install on your PC for LinkedIn / Brave automation (in addition to requirements.txt)
+#   pip install -r requirements.txt -r requirements-local.txt
+selenium

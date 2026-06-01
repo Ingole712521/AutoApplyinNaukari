@@ -39,3 +39,5 @@ dist/
 # Coverage (optional)
 .coverage
 htmlcov/
+.vercel
+.env*

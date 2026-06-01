@@ -29,13 +29,18 @@ Copy the printed line → you will paste it as `NAUKRI_COOKIES_JSON`.
 
 ## 3. Deploy
 
+Ensure `api/cron_apply.py` and `api/health.py` are **committed to Git** before deploy.
+
 ### Option A — Vercel CLI
 
 ```bash
 npm i -g vercel
 vercel login
-vercel
+vercel --prod
 ```
+
+If you see `functions doesn't match any Serverless Functions`, the repo uses explicit
+`builds` in `vercel.json` — pull latest code and redeploy.
 
 ### Option B — GitHub
 

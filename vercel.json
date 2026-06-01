@@ -1,14 +1,33 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/cron_apply.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxDuration": 300
+      }
+    },
+    {
+      "src": "api/health.py",
+      "use": "@vercel/python"
+    },
+    {
+      "src": "public/**",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    { "src": "/api/cron_apply", "dest": "/api/cron_apply.py" },
+    { "src": "/api/health", "dest": "/api/health.py" },
+    { "src": "/", "dest": "/public/index.html" },
+    { "src": "/(.*)", "dest": "/public/$1" }
+  ],
   "crons": [
     {
       "path": "/api/cron_apply",
       "schedule": "30 4 * * *"
     }
-  ],
-  "functions": {
-    "api/*.py": {
-      "maxDuration": 300
-    }
-  }
+  ]
 }
