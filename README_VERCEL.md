@@ -7,7 +7,7 @@ Vercel runs **Naukri** auto-apply **once per day** on a Cron schedule.
 
 | Where | What |
 |--------|------|
-| **Vercel Cron** | `GET /api/cron/apply` once daily → search & apply on Naukri |
+| **Vercel Cron** | `GET /api/cron_apply` once daily → search & apply on Naukri |
 | **Vercel Blob** | Stores `job_applications.xlsx` between runs |
 | **Your PC** | `python react_devops_auto_apply.py` for LinkedIn + optional local Naukri |
 
@@ -84,7 +84,7 @@ Redeploy after changing the schedule.
 
 ```bash
 curl -H "Authorization: Bearer YOUR_CRON_SECRET" \
-  https://YOUR_PROJECT.vercel.app/api/cron/apply
+  https://YOUR_PROJECT.vercel.app/api/cron_apply
 ```
 
 Response JSON includes `naukri.stats` (applied / skipped / failed).

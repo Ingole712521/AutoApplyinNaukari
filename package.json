@@ -1,0 +1,6 @@
+{
+  "name": "auto-apply-naukri",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Naukri auto-apply — Vercel Cron + Python serverless API"
+}

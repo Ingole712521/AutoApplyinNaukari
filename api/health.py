@@ -14,7 +14,7 @@ class handler(BaseHTTPRequestHandler):
             "service": "auto-apply-naukri",
             "vercel": bool(os.getenv("VERCEL")),
             "cron_schedule": "once daily at 04:30 UTC (10:00 IST)",
-            "cron_path": "/api/cron/apply",
+            "cron_path": "/api/cron_apply",
             "naukri_cookies_set": bool(os.getenv("NAUKRI_COOKIES_JSON")),
             "blob_storage": bool(os.getenv("BLOB_READ_WRITE_TOKEN")),
             "linkedin_on_vercel": False,

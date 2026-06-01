@@ -1,6 +1,7 @@
 """
 Vercel Cron — runs Naukri auto-apply once per day.
 
+URL: /api/cron_apply
 Secured with CRON_SECRET (Vercel sends Authorization: Bearer <CRON_SECRET>).
 """
 
@@ -12,8 +13,8 @@ import sys
 import traceback
 from http.server import BaseHTTPRequestHandler
 
-# Project root on Vercel Python runtime
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Project root (api/cron_apply.py -> parent of api/)
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 

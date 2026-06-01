@@ -1,15 +1,13 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "version": 2,
-  "name": "auto-apply-naukri",
   "crons": [
     {
-      "path": "/api/cron/apply",
+      "path": "/api/cron_apply",
       "schedule": "30 4 * * *"
     }
   ],
   "functions": {
-    "api/cron/apply.py": {
+    "api/*.py": {
       "maxDuration": 300
     }
   }
