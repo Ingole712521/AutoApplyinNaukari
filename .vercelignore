@@ -1,4 +1,3 @@
-# Keep serverless bundle smaller (LinkedIn/browser not used on Vercel)
 google_login.py
 linkedin_login.py
 src/client/linkedin_client.py

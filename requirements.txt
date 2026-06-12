@@ -1,4 +1,3 @@
-# Vercel + Naukri API (no Selenium — LinkedIn runs only on your PC)
 requests
 urllib3
 httpcloak

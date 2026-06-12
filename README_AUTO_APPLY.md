@@ -52,18 +52,24 @@ python linkedin_login.py
 
 Saves `linkedin_cookies.json`. **Brave** opens; complete login manually.
 
-### 5. Run auto-apply
+### 5. Run auto-apply (Naukri + LinkedIn in one command)
 
 ```bash
-python react_devops_auto_apply.py
+python auto_apply.py
 ```
 
-Runs Naukri + LinkedIn, then waits **30 minutes** and runs again. Press **Ctrl+C** to stop.
+Same as `python react_devops_auto_apply.py` — searches **both Naukri and LinkedIn**, then applies. Waits **30 minutes** and repeats. Press **Ctrl+C** to stop.
 
 Single run (no loop):
 
 ```bash
-python react_devops_auto_apply.py --once
+python auto_apply.py --once
+```
+
+Search both sites without applying:
+
+```bash
+python auto_apply.py --once --search-only
 ```
 
 ## Configuration (`config.py`)

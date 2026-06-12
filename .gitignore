@@ -1,21 +1,16 @@
-# Env files
 .env
 .env.*
 
-# Python cache
 __pycache__/
 *.py[cod]
 *$py.class
 
-# Virtual environment
 venv/
 .env/
 .venv/
 
-# Logs
 *.log
 
-# Auto-apply tracking
 applied_jobs.csv
 nkPool.txt
 naukri_cookies.json
@@ -23,20 +18,16 @@ linkedin_cookies.json
 naukri_jobs.xlsx
 job_applications.xlsx
 
-# OS files
 .DS_Store
 Thumbs.db
 
-# IDEs
 .vscode/
 .idea/
 
-# Python build files
 build/
 dist/
 *.egg-info/
 
-# Coverage (optional)
 .coverage
 htmlcov/
 .vercel

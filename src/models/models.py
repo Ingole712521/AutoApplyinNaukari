@@ -1,8 +1,6 @@
-
 from dataclasses import dataclass, field
 import time
 from typing import Any, Dict
-
 
 @dataclass
 class NaukriSession:
@@ -22,7 +20,6 @@ class ResumeUpdateResult:
     raw_response: dict
     status_code: int
 
-
 @dataclass
 class Job:
     job_id: str
@@ -33,7 +30,7 @@ class Job:
     salary: str
     posted_date: str
     apply_link: str
-    description: str = ""
+    description: str = ''
     tags: list = field(default_factory=list)
 
 @dataclass
@@ -41,7 +38,6 @@ class ProfileUpdateResult:
     profile_id: str
     response: Dict[str, Any]
     status_code: int
-
 
 @dataclass
 class ApplicationStatus:
