@@ -9,10 +9,17 @@ from dotenv import load_dotenv
 
 from config import (
     APPLY_DELAY_SEC,
+    APPLIED_JOBS_CSV,
+    ENABLE_FOUNDIT,
     ENABLE_LINKEDIN,
     ENABLE_NAUKRI,
+    ENABLE_REMOTIVE,
+    ENABLE_REMOTE_OK,
+    ENABLE_SURELY_REMOTE,
     EXCEL_FILE,
     EXPERIENCE_YEARS,
+    EXTERNAL_BOARD_KEYWORDS,
+    FOUNDIT_MAX_PAGES,
     JOB_AGE_DAYS,
     LINKEDIN_COOKIES_FILE,
     LINKEDIN_HEADLESS,
@@ -20,6 +27,8 @@ from config import (
     LINKEDIN_MAX_JOBS_PER_QUERY,
     LINKEDIN_SEARCH_QUERIES,
     LOOP_INTERVAL_MINUTES,
+    MAX_PAGES_PER_QUERY,
+    NAUKRI_RESULTS_PER_PAGE,
     PAGES_PER_QUERY,
     SEARCH_DELAY_SEC,
     SEARCH_QUERIES,
@@ -30,7 +39,7 @@ from src.client.job_client import NaukriJobClient
 from src.client.naukri_client import NaukriLoginClient
 from src.exceptions.exceptions import NaukriAuthError
 from src.utils.company_tracker import normalize_company
-from src.utils.excel_logger import ExcelJobLogger
+from src.utils.excel_logger import ExcelJobLogger, load_csv_applied_job_ids, normalize_job_id
 load_dotenv()
 init(autoreset=True)
 LINE = f"{Fore.WHITE}{'─' * 68}{Style.RESET_ALL}"
@@ -51,20 +60,58 @@ def should_skip_company(excel: ExcelJobLogger, company: str, applied_companies: 
         return False
     return excel.is_company_applied(company, applied_companies)
 
-def fetch_naukri_jobs(jc: NaukriJobClient) -> list[tuple]:
+
+def bootstrap_applied_ids(excel: ExcelJobLogger, jc: NaukriJobClient | None = None) -> tuple[set[str], set[str]]:
+    applied_ids = excel.load_applied_job_ids()
+    csv_ids = load_csv_applied_job_ids(APPLIED_JOBS_CSV)
+    if csv_ids:
+        applied_ids |= csv_ids
+        print(f' {Fore.CYAN}Loaded {len(csv_ids)} job ID(s) from {APPLIED_JOBS_CSV}{Style.RESET_ALL}')
+    naukri_count = 0
+    if jc is not None:
+        try:
+            history = jc.fetch_all_application_history(days=90, page_size=50)
+            for item in history:
+                jid = normalize_job_id(item.job_id)
+                if jid:
+                    applied_ids.add(jid)
+            naukri_count = len(history)
+            if naukri_count:
+                print(f' {Fore.CYAN}Synced {naukri_count} job(s) from Naukri apply history{Style.RESET_ALL}')
+        except Exception as exc:
+            print(f' {Fore.YELLOW}Naukri history sync skipped: {exc}{Style.RESET_ALL}')
+    applied_companies = excel.load_applied_companies()
+    return applied_ids, applied_companies
+
+
+def _skip_already_applied(job, keyword: str, applied_ids: set[str], excel: ExcelJobLogger, stats: dict) -> bool:
+    jid = normalize_job_id(job.job_id)
+    if not jid or jid not in applied_ids:
+        return False
+    print(f' {Fore.WHITE}Skipped — already applied (Excel / Naukri history / CSV){Style.RESET_ALL}')
+    excel.append_job(
+        job, keyword, status='Skipped - Already Applied',
+        notes='Known applied job — not sending apply again', platform='Naukri',
+    )
+    stats['skipped_applied'] += 1
+    return True
+
+
+def fetch_naukri_jobs(jc: NaukriJobClient, applied_ids: set[str] | None = None) -> list[tuple]:
     seen: set[str] = set()
     results: list[tuple] = []
 
+    known = applied_ids or set()
     print_section(
-        f"Naukri search — {len(SEARCH_QUERIES)} queries, "
-        f"{PAGES_PER_QUERY} page(s) each, exp={EXPERIENCE_YEARS}yr"
+        f'Naukri search — {len(SEARCH_QUERIES)} queries, up to {MAX_PAGES_PER_QUERY} page(s), '
+        f'{NAUKRI_RESULTS_PER_PAGE}/page, exp={EXPERIENCE_YEARS}yr, skipping {len(known)} known IDs'
     )
 
     for query in SEARCH_QUERIES:
-        keyword = query["keyword"]
-        location = query.get("location", "")
+        keyword = query['keyword']
+        location = query.get('location', '')
 
-        for page in range(1, PAGES_PER_QUERY + 1):
+        for page in range(1, MAX_PAGES_PER_QUERY + 1):
             try:
                 jobs = jc.search_jobs(
                     keyword=keyword,
@@ -72,6 +119,7 @@ def fetch_naukri_jobs(jc: NaukriJobClient) -> list[tuple]:
                     experience=EXPERIENCE_YEARS,
                     job_age=JOB_AGE_DAYS,
                     page=page,
+                    results_per_page=NAUKRI_RESULTS_PER_PAGE,
                 )
             except NaukriAuthError as exc:
                 print(f' {Fore.RED}[AUTH]{Style.RESET_ALL} {keyword} p{page}: {exc}')
@@ -83,11 +131,12 @@ def fetch_naukri_jobs(jc: NaukriJobClient) -> list[tuple]:
                 continue
             new_count = 0
             for job in jobs:
-                if job.job_id in seen:
+                jid = normalize_job_id(job.job_id)
+                if not jid or jid in seen or jid in known:
                     continue
                 if not title_matches_role(job.title):
                     continue
-                seen.add(job.job_id)
+                seen.add(jid)
                 results.append((job, keyword))
                 new_count += 1
             loc_label = location or 'All India'
@@ -100,15 +149,15 @@ def fetch_naukri_jobs(jc: NaukriJobClient) -> list[tuple]:
 
 def apply_naukri_jobs(jc: NaukriJobClient, job_entries: list[tuple], applied_ids: set[str], applied_companies: set[str], excel: ExcelJobLogger) -> dict:
     stats = {'applied': 0, 'skipped_applied': 0, 'skipped_company': 0, 'skipped_external': 0, 'failed': 0}
-    print_section(f'Naukri apply — {len(job_entries)} jobs, {len(applied_ids)} job IDs / {len(applied_companies)} companies in Excel')
+    print_section(
+        f'Naukri apply — {len(job_entries)} new jobs, '
+        f'{len(applied_ids)} known applied IDs in memory'
+    )
     for index, (job, keyword) in enumerate(job_entries, start=1):
         print(f'\n{LINE}')
         print(f' {Fore.CYAN}{Style.BRIGHT}[{index}/{len(job_entries)}]{Style.RESET_ALL} {Style.BRIGHT}{job.title}{Style.RESET_ALL}')
         print(f' {Fore.WHITE}Company:{Style.RESET_ALL} {Fore.YELLOW}{job.company}{Style.RESET_ALL}')
-        if job.job_id in applied_ids:
-            print(f' {Fore.WHITE}Skipped — job ID already applied{Style.RESET_ALL}')
-            excel.append_job(job, keyword, status='Skipped - Already Applied', notes='Same job ID on a later run', platform='Naukri')
-            stats['skipped_applied'] += 1
+        if _skip_already_applied(job, keyword, applied_ids, excel, stats):
             continue
         if should_skip_company(excel, job.company, applied_companies):
             print(f' {Fore.WHITE}Skipped — company already applied{Style.RESET_ALL}')
@@ -125,20 +174,40 @@ def apply_naukri_jobs(jc: NaukriJobClient, job_entries: list[tuple], applied_ids
         mandatory = job.tags[:2] if job.tags else []
         optional = job.tags[2:] if len(job.tags) > 2 else []
         try:
-            result = jc.apply_job(job, mandatory_skills=mandatory, optional_skills=optional, source='search')
+            sid = datetime.utcnow().strftime('%Y%m%d%H%M%S') + '0000000'
+            result = jc.apply_job(
+                job, mandatory_skills=mandatory, optional_skills=optional, sid=sid, source='search',
+            )
             job_result = (result.get('jobs') or [{}])[0]
             if job_result.get('questionnaire'):
-                print(f' {Fore.CYAN}Questionnaire — auto-filling (yes / 30 days notice / 2yr){Style.RESET_ALL}')
-                sid = datetime.utcnow().strftime('%Y%m%d%H%M%S') + '0000000'
-                jc.handle_static_questionnaire_and_apply(job, questionnaire=job_result['questionnaire'], sid=sid, mandatory_skills=mandatory, optional_skills=optional, source='search')
-            applied_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            print(f' {Fore.GREEN}Applied successfully{Style.RESET_ALL}')
-            excel.append_job(job, keyword, status='Applied', applied_at=applied_at, notes='Easy apply on Naukri', platform='Naukri')
-            applied_ids.add(job.job_id)
-            norm = normalize_company(job.company)
-            if norm:
-                applied_companies.add(norm)
-            stats['applied'] += 1
+                print(f' {Fore.CYAN}Questionnaire — auto-filling{Style.RESET_ALL}')
+                result = jc.handle_static_questionnaire_and_apply(
+                    job, questionnaire=job_result['questionnaire'], sid=sid,
+                    mandatory_skills=mandatory, optional_skills=optional, source='search',
+                )
+            ok, msg, already_on_naukri = jc.parse_apply_result(result, normalize_job_id(job.job_id))
+            if not ok:
+                raise RuntimeError(msg)
+            jid = normalize_job_id(job.job_id)
+            applied_ids.add(jid)
+            if already_on_naukri:
+                print(f' {Fore.WHITE}Already on Naukri — no duplicate apply sent{Style.RESET_ALL}')
+                excel.append_job(
+                    job, keyword, status='Skipped - Already Applied',
+                    notes=msg, platform='Naukri',
+                )
+                stats['skipped_applied'] += 1
+            else:
+                applied_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                print(f' {Fore.GREEN}Applied successfully{Style.RESET_ALL}')
+                excel.append_job(
+                    job, keyword, status='Applied', applied_at=applied_at,
+                    notes=msg, platform='Naukri',
+                )
+                norm = normalize_company(job.company)
+                if norm:
+                    applied_companies.add(norm)
+                stats['applied'] += 1
         except Exception as exc:
             print(f' {Fore.RED}Failed — {exc}{Style.RESET_ALL}')
             excel.append_job(job, keyword, status='Failed', notes=str(exc), platform='Naukri')
@@ -178,7 +247,8 @@ def apply_linkedin_jobs(li, excel: ExcelJobLogger, applied_ids: set[str], applie
         print(f'\n{LINE}')
         print(f' {Fore.CYAN}{Style.BRIGHT}[{index}/{len(all_jobs)}]{Style.RESET_ALL} {Style.BRIGHT}{job.title}{Style.RESET_ALL}')
         print(f' {Fore.WHITE}Company:{Style.RESET_ALL} {Fore.YELLOW}{job.company}{Style.RESET_ALL}')
-        if job.job_id in applied_ids:
+        jid = normalize_job_id(job.job_id)
+        if jid in applied_ids:
             print(f' {Fore.WHITE}Skipped — job ID already applied{Style.RESET_ALL}')
             excel.append_job(job, keyword, status='Skipped - Already Applied', notes='Same job ID on a later run', platform='LinkedIn')
             stats['skipped_applied'] += 1
@@ -246,10 +316,12 @@ def _print_search_only_jobs(platform: str, entries: list[tuple]) -> None:
 
 def run_cycle(excel_file: str, search_only: bool=False) -> int:
     excel = ExcelJobLogger(excel_file)
-    applied_ids = excel.load_applied_job_ids()
-    applied_companies = excel.load_applied_companies()
+    applied_ids, applied_companies = bootstrap_applied_ids(excel)
     if excel.filepath.exists():
-        print(f' {Fore.CYAN}Excel: {excel_file} — {len(applied_ids)} jobs, {len(applied_companies)} companies applied{Style.RESET_ALL}')
+        print(
+            f' {Fore.CYAN}Excel: {excel_file} — {len(applied_ids)} known job IDs, '
+            f'{len(applied_companies)} companies applied{Style.RESET_ALL}'
+        )
     else:
         print(f' {Fore.CYAN}Excel: {excel_file} (created on first save){Style.RESET_ALL}')
     exit_code = 0
@@ -279,7 +351,8 @@ def run_cycle(excel_file: str, search_only: bool=False) -> int:
             exit_code = 1
         if exit_code == 0:
             jc = NaukriJobClient(client)
-            entries = fetch_naukri_jobs(jc)
+            applied_ids, applied_companies = bootstrap_applied_ids(excel, jc)
+            entries = fetch_naukri_jobs(jc, applied_ids)
             if search_only:
                 _print_search_only_jobs('Naukri', entries)
             elif entries:
@@ -314,6 +387,77 @@ def run_cycle(excel_file: str, search_only: bool=False) -> int:
             li.stop()
 
     return exit_code
+
+
+def collect_external_board_jobs(
+    excel: ExcelJobLogger,
+    applied_ids: set[str],
+    applied_companies: set[str],
+) -> dict[str, dict]:
+    from src.client.external_job_sources import (
+        fetch_foundit_jobs,
+        fetch_remote_ok_jobs,
+        fetch_remotive_jobs,
+        fetch_surely_remote_jobs,
+    )
+
+    board_stats: dict[str, dict] = {}
+
+    def _log_external(job, keyword: str, platform: str) -> dict:
+        stats = {'applied': 0, 'skipped_applied': 0, 'skipped_company': 0, 'skipped_external': 0, 'failed': 0}
+        jid = normalize_job_id(job.job_id)
+        if jid in applied_ids:
+            stats['skipped_applied'] += 1
+            return stats
+        if should_skip_company(excel, job.company, applied_companies):
+            stats['skipped_company'] += 1
+            return stats
+        excel.append_job(
+            job, keyword, status='Skipped - External Apply',
+            notes=f'Apply on {platform}', platform=platform,
+            external_apply_url=getattr(job, 'apply_link', '') or '',
+        )
+        applied_ids.add(jid)
+        stats['skipped_external'] += 1
+        return stats
+
+    if ENABLE_FOUNDIT:
+        stats = {'applied': 0, 'skipped_applied': 0, 'skipped_company': 0, 'skipped_external': 0, 'failed': 0}
+        for keyword in EXTERNAL_BOARD_KEYWORDS:
+            try:
+                jobs = fetch_foundit_jobs(keyword, max_pages=FOUNDIT_MAX_PAGES, delay_sec=SEARCH_DELAY_SEC)
+            except Exception as exc:
+                print(f' {Fore.RED}[Foundit]{Style.RESET_ALL} {keyword}: {exc}')
+                continue
+            for job in jobs:
+                for key, val in _log_external(job, keyword, 'Foundit').items():
+                    stats[key] += val
+        board_stats['Foundit'] = stats
+
+    if ENABLE_REMOTE_OK:
+        stats = {'applied': 0, 'skipped_applied': 0, 'skipped_company': 0, 'skipped_external': 0, 'failed': 0}
+        for job in fetch_remote_ok_jobs():
+            for key, val in _log_external(job, 'remote ok', 'RemoteOK').items():
+                stats[key] += val
+        board_stats['RemoteOK'] = stats
+
+    if ENABLE_REMOTIVE:
+        stats = {'applied': 0, 'skipped_applied': 0, 'skipped_company': 0, 'skipped_external': 0, 'failed': 0}
+        for job in fetch_remotive_jobs():
+            for key, val in _log_external(job, 'remotive', 'Remotive').items():
+                stats[key] += val
+        board_stats['Remotive'] = stats
+
+    if ENABLE_SURELY_REMOTE:
+        stats = {'applied': 0, 'skipped_applied': 0, 'skipped_company': 0, 'skipped_external': 0, 'failed': 0}
+        for keyword in EXTERNAL_BOARD_KEYWORDS:
+            for job in fetch_surely_remote_jobs(keyword):
+                for key, val in _log_external(job, keyword, 'SurelyRemote').items():
+                    stats[key] += val
+        board_stats['SurelyRemote'] = stats
+
+    return board_stats
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description='Naukri + LinkedIn auto-apply')

@@ -5,8 +5,34 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font
 from src.utils.company_tracker import normalize_company
 from src.utils.formatters import excel_cell_value
+
 SHEET_NAME = 'Job Applications'
 COLUMNS = ['Platform', 'Run Date', 'Run Time', 'Job ID', 'Job Title', 'Company', 'Location', 'Experience', 'Salary', 'Posted Date', 'Search Keyword', 'Skills', 'Job URL', 'External Apply URL', 'Status', 'Applied At', 'Notes']
+
+SKIP_JOB_STATUSES = frozenset({
+    'Applied',
+    'Skipped - Already Applied',
+    'Skipped - External Apply',
+})
+
+
+def normalize_job_id(job_id: str) -> str:
+    return str(job_id or '').strip()
+
+
+def load_csv_applied_job_ids(csv_path: str) -> set[str]:
+    path = Path(csv_path)
+    if not path.exists():
+        return set()
+    import csv
+    ids: set[str] = set()
+    with path.open('r', newline='', encoding='utf-8') as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            jid = normalize_job_id(row.get('job_id', ''))
+            if jid:
+                ids.add(jid)
+    return ids
 
 class ExcelJobLogger:
 
@@ -41,8 +67,10 @@ class ExcelJobLogger:
         for row in rows:
             if not row or len(row) <= max(job_id_idx, status_idx):
                 continue
-            if row[status_idx] == 'Applied' and row[job_id_idx]:
-                applied.add(str(row[job_id_idx]))
+            status = str(row[status_idx] or '').strip()
+            jid = normalize_job_id(row[job_id_idx])
+            if status in SKIP_JOB_STATUSES and jid:
+                applied.add(jid)
         return applied
 
     def load_applied_companies(self) -> set[str]:

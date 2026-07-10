@@ -50,9 +50,11 @@ def run_apply_cycle() -> dict[str, Any]:
     applied_ids: set[str] = set()
     applied_companies: set[str] = set()
     exit_code = 0
-    from src.utils.excel_logger import ExcelJobLogger
+    from config import APPLIED_JOBS_CSV
+    from src.utils.excel_logger import ExcelJobLogger, load_csv_applied_job_ids
     excel = ExcelJobLogger(excel_file)
     applied_ids = excel.load_applied_job_ids()
+    applied_ids |= load_csv_applied_job_ids(APPLIED_JOBS_CSV)
     applied_companies = excel.load_applied_companies()
     if enable_naukri:
         naukri_result = _run_naukri(runner, excel, excel_file, applied_ids, applied_companies)
@@ -102,7 +104,8 @@ def _run_naukri(runner, excel, excel_file, applied_ids, applied_companies) -> di
         result['error'] = str(exc)
         return result
     jc = NaukriJobClient(client)
-    entries = runner.fetch_naukri_jobs(jc)
+    applied_ids, applied_companies = runner.bootstrap_applied_ids(excel, jc)
+    entries = runner.fetch_naukri_jobs(jc, applied_ids)
     result['jobs_found'] = len(entries)
     if entries:
         stats = runner.apply_naukri_jobs(jc, entries, applied_ids, applied_companies, excel)

@@ -29,7 +29,7 @@ class NaukriJobClient:
 
     def _parse_job(self, raw: dict) -> Job:
         location = next((p['label'] for p in raw.get('placeholders', []) if p.get('type') == 'location'), 'N/A')
-        return Job(job_id=str(raw.get('jobId') or raw.get('id') or ''), title=raw.get('title') or raw.get('jobTitle') or 'N/A', company=raw.get('companyName') or raw.get('company') or 'N/A', location=location, experience=raw.get('experienceText') or raw.get('experience') or 'N/A', salary=format_salary(raw.get('salaryDetail') or raw.get('salary')), posted_date=raw.get('footerPlaceholderLabel') or raw.get('postedDate') or 'N/A', apply_link=raw.get('jdURL') or f"https://www.naukri.com/job-listings-{raw.get('jobId', '')}", description=raw.get('jobDescription') or '', tags=[t.strip() for t in raw.get('tagsAndSkills', '').split(',')] if raw.get('tagsAndSkills') else [])
+        return Job(job_id=str(raw.get('jobId') or raw.get('id') or '').strip(), title=raw.get('title') or raw.get('jobTitle') or 'N/A', company=raw.get('companyName') or raw.get('company') or 'N/A', location=location, experience=raw.get('experienceText') or raw.get('experience') or 'N/A', salary=format_salary(raw.get('salaryDetail') or raw.get('salary')), posted_date=raw.get('footerPlaceholderLabel') or raw.get('postedDate') or 'N/A', apply_link=raw.get('jdURL') or f"https://www.naukri.com/job-listings-{raw.get('jobId', '')}", description=raw.get('jobDescription') or '', tags=[t.strip() for t in raw.get('tagsAndSkills', '').split(',')] if raw.get('tagsAndSkills') else [])
 
     def _cluster_dates(self) -> dict:
         now = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.000Z')
@@ -120,6 +120,50 @@ class NaukriJobClient:
                 return jd
             return f'https://www.naukri.com{jd}' if jd.startswith('/') else jd
         return f'https://www.naukri.com/job-listings-{job_id}'
+
+    def parse_apply_result(self, result: dict, job_id: str = '') -> tuple[bool, str, bool]:
+        if result.get('success') is False:
+            return False, str(result.get('error') or result)[:300], False
+        jobs = result.get('jobs') or []
+        if not jobs:
+            msg = str(result.get('message') or result.get('msg') or result)[:300]
+            return False, msg or 'Empty apply response from Naukri', False
+        job_result = jobs[0]
+        if job_result.get('questionnaire'):
+            return False, 'questionnaire_required', False
+        status = str(job_result.get('status') or job_result.get('applyStatus') or '').lower()
+        message = str(
+            job_result.get('message') or job_result.get('msg') or job_result.get('error') or ''
+        )
+        combined = f'{status} {message}'.lower()
+        if 'already' in combined or job_result.get('alreadyApplied'):
+            return True, message or 'Already applied on Naukri', True
+        if status in ('applied', 'success', 'ok', 'complete', 'completed'):
+            return True, message or 'Applied on Naukri', False
+        if job_result.get('applied') is True or job_result.get('isApplied') is True:
+            return True, message or 'Applied on Naukri', False
+        if result.get('success') is True and not status:
+            return True, message or 'Applied on Naukri', False
+        rid = job_result.get('jobId') or job_id
+        return False, message or f'Naukri did not confirm apply for job {rid}', False
+
+    def fetch_all_application_history(self, days: int = 90, page_size: int = 50) -> list:
+        if not self._client.naukri_session:
+            raise NaukriAuthError('Login required for application history')
+        all_items = []
+        page = 1
+        while True:
+            raw = self._client.get_application_history(
+                page_size=page_size, days=days, page_number=page,
+            )
+            batch = self._client.parse_history(raw)
+            if not batch:
+                break
+            all_items.extend(batch)
+            if len(batch) < page_size:
+                break
+            page += 1
+        return all_items
 
     def apply_job(self, job: Job, mandatory_skills: list[str]=None, optional_skills: list[str]=None, sid: str='', source: str='recommended') -> dict:
         url = APPLY_JOB_URL
@@ -234,11 +278,11 @@ class NaukriJobClient:
         res = self._session.post(APPLY_JOB_URL, headers=headers, json=payload)
         if not res.ok:
             logger.debug('Apply failed: %s', res.text)
-            return {'success': False, 'error': res.text}
+            raise NaukriParseError(f'Questionnaire apply failed: {res.status_code} — {res.text}')
         try:
             return res.json()
-        except Exception:
-            return {'success': False, 'error': 'Invalid JSON response'}
+        except Exception as exc:
+            raise NaukriParseError(f'Invalid JSON response: {exc}') from exc
 
     def get_recommended_jobs(self) -> list[Job]:
         url = RECOMMENDED_JOBS_URL
