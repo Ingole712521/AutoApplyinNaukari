@@ -3,7 +3,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from src.utils.browser import browser_label, create_webdriver
+from src.utils.browser import browser_label, create_webdriver, quit_webdriver
 LOGIN_URL = 'https://www.linkedin.com/login'
 OUTPUT_FILE = Path('linkedin_cookies.json')
 TIMEOUT_SEC = 300
@@ -41,6 +41,6 @@ def main() -> int:
         print('Timed out waiting for login. Try again within 5 minutes.')
         return 1
     finally:
-        driver.quit()
+        quit_webdriver(driver)
 if __name__ == '__main__':
     sys.exit(main())

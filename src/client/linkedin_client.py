@@ -13,7 +13,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from config import APPLICANT_PROFILE, LINKEDIN_EASY_APPLY_MAX_STEPS
 from src.client.linkedin_easy_apply_form import LinkedInEasyApplyForm
-from src.utils.browser import create_webdriver
+from src.utils.browser import create_webdriver, quit_webdriver
 logger = logging.getLogger(__name__)
 EASY_APPLY_LABELS = ('easy apply', 'in easy apply')
 EXTERNAL_APPLY_LABELS = ('apply on company', 'apply on the company', 'apply on website')
@@ -59,7 +59,7 @@ class LinkedInApplyClient:
 
     def stop(self) -> None:
         if self.driver:
-            self.driver.quit()
+            quit_webdriver(self.driver)
             self.driver = None
 
     def search_jobs(self, keyword: str, location: str, max_jobs: int) -> list[LinkedInJob]:
