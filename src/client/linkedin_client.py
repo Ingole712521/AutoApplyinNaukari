@@ -62,14 +62,20 @@ class LinkedInApplyClient:
             quit_webdriver(self.driver)
             self.driver = None
 
-    def search_jobs(self, keyword: str, location: str, max_jobs: int) -> list[LinkedInJob]:
+    def search_jobs(
+        self,
+        keyword: str,
+        location: str,
+        max_jobs: int,
+        scroll_rounds: int = 12,
+    ) -> list[LinkedInJob]:
         if not self.driver:
             raise RuntimeError('Browser not started')
         params = {'keywords': keyword, 'location': location, 'f_AL': 'true'}
         url = 'https://www.linkedin.com/jobs/search/?' + urllib.parse.urlencode(params)
         self.driver.get(url)
         time.sleep(4)
-        self._scroll_results()
+        self._scroll_results(rounds=scroll_rounds)
         cards = self.driver.find_elements(By.CSS_SELECTOR, 'div.job-card-container, li.jobs-search-results__list-item, div.base-card')
         jobs: list[LinkedInJob] = []
         seen_urls: set[str] = set()
@@ -150,11 +156,34 @@ class LinkedInApplyClient:
             urls.append(job.job_url.split('?')[0])
         return urls or [job.job_url]
 
-    def _scroll_results(self) -> None:
+    def _scroll_results(self, rounds: int = 12) -> None:
         assert self.driver
-        for _ in range(4):
-            self.driver.execute_script('window.scrollBy(0, 800);')
-            time.sleep(1.2)
+        list_selectors = [
+            '.jobs-search-results-list',
+            '.scaffold-layout__list',
+            'ul.jobs-search-results__list',
+            '.jobs-search__results-list',
+            'div.scaffold-layout__list-container',
+        ]
+        panel = None
+        for sel in list_selectors:
+            try:
+                panel = self.driver.find_element(By.CSS_SELECTOR, sel)
+                break
+            except NoSuchElementException:
+                continue
+        for _ in range(rounds):
+            if panel:
+                try:
+                    self.driver.execute_script(
+                        'arguments[0].scrollTop = arguments[0].scrollHeight;',
+                        panel,
+                    )
+                except StaleElementReferenceException:
+                    panel = None
+            if not panel:
+                self.driver.execute_script('window.scrollBy(0, 900);')
+            time.sleep(1.0)
 
     def _page_shows_applied(self) -> bool:
         assert self.driver

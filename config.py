@@ -77,11 +77,41 @@ EXCEL_FILE = os.getenv('EXCEL_FILE', 'job_applications.xlsx')
 APPLIED_JOBS_CSV = 'applied_jobs.csv'
 
 LINKEDIN_COOKIES_FILE = 'linkedin_cookies.json'
-LINKEDIN_LOCATION = 'India'
-LINKEDIN_MAX_JOBS_PER_QUERY = _env_int('LINKEDIN_MAX_JOBS_PER_QUERY', 15)
+LINKEDIN_LOCATION = os.getenv('LINKEDIN_LOCATION', 'India')
+LINKEDIN_MAX_JOBS_PER_QUERY = _env_int('LINKEDIN_MAX_JOBS_PER_QUERY', 50)
+LINKEDIN_SCROLL_ROUNDS = _env_int('LINKEDIN_SCROLL_ROUNDS', 15)
+
+# LinkedIn: DevOps + AWS only (Easy Apply filter f_AL=true is set in linkedin_client)
 LINKEDIN_SEARCH_QUERIES = [
-    'AWS DevOps', 'Cloud Engineer', 'DevOps Engineer', 'DevOps',
-    'React Developer', 'React.js Developer', 'Site Reliability Engineer',
+    'DevOps Engineer',
+    'DevOps',
+    'Senior DevOps Engineer',
+    'AWS DevOps Engineer',
+    'AWS DevOps',
+    'AWS Engineer',
+    'AWS Cloud Engineer',
+    'AWS Solutions Architect',
+    'Amazon Web Services',
+    'Cloud Engineer',
+    'Cloud DevOps',
+    'Site Reliability Engineer',
+    'Platform Engineer',
+    'Infrastructure Engineer',
+    'Kubernetes Engineer',
+    'Terraform Engineer',
+    'CI/CD Engineer',
+    'Azure DevOps Engineer',
+    'GCP DevOps',
+    'Linux DevOps',
+]
+
+# Match job title before applying on LinkedIn (DevOps / AWS / cloud stack only)
+LINKEDIN_TITLE_KEYWORDS = [
+    'devops', 'dev ops', 'sre', 'site reliability', 'platform engineer',
+    'cloud', 'aws', 'amazon web services', 'azure', 'gcp',
+    'kubernetes', 'k8s', 'docker', 'terraform', 'ansible', 'ci/cd', 'cicd',
+    'jenkins', 'infrastructure', 'infra', 'linux', 'release engineer',
+    'cloud engineer', 'cloud architect', 'solutions architect',
 ]
 LINKEDIN_HEADLESS = _env_bool('LINKEDIN_HEADLESS', False)
 USE_BRAVE_BROWSER = True

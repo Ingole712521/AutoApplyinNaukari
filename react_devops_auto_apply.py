@@ -25,7 +25,9 @@ from config import (
     LINKEDIN_HEADLESS,
     LINKEDIN_LOCATION,
     LINKEDIN_MAX_JOBS_PER_QUERY,
+    LINKEDIN_SCROLL_ROUNDS,
     LINKEDIN_SEARCH_QUERIES,
+    LINKEDIN_TITLE_KEYWORDS,
     LOOP_INTERVAL_MINUTES,
     MAX_PAGES_PER_QUERY,
     NAUKRI_RESULTS_PER_PAGE,
@@ -53,6 +55,11 @@ def print_section(title: str) -> None:
 def title_matches_role(title: str) -> bool:
     lower = title.lower()
     return any(kw in lower for kw in TITLE_KEYWORDS)
+
+
+def linkedin_title_matches(title: str) -> bool:
+    lower = title.lower()
+    return any(kw in lower for kw in LINKEDIN_TITLE_KEYWORDS)
 
 
 def should_skip_company(excel: ExcelJobLogger, company: str, applied_companies: set[str]) -> bool:
@@ -215,28 +222,38 @@ def apply_naukri_jobs(jc: NaukriJobClient, job_entries: list[tuple], applied_ids
         time.sleep(APPLY_DELAY_SEC)
     return stats
 
-def fetch_linkedin_jobs(li) -> list[tuple]:
+def fetch_linkedin_jobs(li, applied_ids: set[str] | None = None) -> list[tuple]:
     all_jobs: list[tuple] = []
     seen: set[str] = set()
-    print_section(f'LinkedIn search — {len(LINKEDIN_SEARCH_QUERIES)} keywords')
+    known = applied_ids or set()
+    print_section(
+        f'LinkedIn DevOps/AWS — {len(LINKEDIN_SEARCH_QUERIES)} keywords, '
+        f'up to {LINKEDIN_MAX_JOBS_PER_QUERY} Easy Apply jobs each'
+    )
     for keyword in LINKEDIN_SEARCH_QUERIES:
         try:
-            jobs = li.search_jobs(keyword, LINKEDIN_LOCATION, LINKEDIN_MAX_JOBS_PER_QUERY)
+            jobs = li.search_jobs(
+                keyword,
+                LINKEDIN_LOCATION,
+                LINKEDIN_MAX_JOBS_PER_QUERY,
+                scroll_rounds=LINKEDIN_SCROLL_ROUNDS,
+            )
         except Exception as exc:
             print(f' {Fore.RED}[FAIL]{Style.RESET_ALL} {keyword}: {exc}')
             continue
         new = 0
         for job in jobs:
-            if not title_matches_role(job.title):
+            jid = normalize_job_id(job.job_id)
+            if not jid or jid in seen or jid in known:
                 continue
-            if job.job_id in seen:
+            if not linkedin_title_matches(job.title):
                 continue
-            seen.add(job.job_id)
+            seen.add(jid)
             all_jobs.append((job, keyword))
             new += 1
-        print(f' {Fore.WHITE}[{keyword[:40]:<40}]{Style.RESET_ALL} {len(jobs):>3} listed, {Fore.GREEN}{new:>3} new{Style.RESET_ALL}')
+        print(f' {Fore.WHITE}[{keyword[:40]:<40}]{Style.RESET_ALL} {len(jobs):>3} listed, {Fore.GREEN}{new:>3} DevOps/AWS matches{Style.RESET_ALL}')
         time.sleep(SEARCH_DELAY_SEC)
-    print(f'\n {Fore.CYAN}LinkedIn matching jobs: {Style.BRIGHT}{len(all_jobs)}{Style.RESET_ALL}')
+    print(f'\n {Fore.CYAN}LinkedIn DevOps/AWS jobs to apply: {Style.BRIGHT}{len(all_jobs)}{Style.RESET_ALL}')
     return all_jobs
 
 def apply_linkedin_jobs(li, excel: ExcelJobLogger, applied_ids: set[str], applied_companies: set[str], job_entries: list[tuple] | None=None) -> dict:
@@ -314,7 +331,7 @@ def _print_search_only_jobs(platform: str, entries: list[tuple]) -> None:
         if url:
             print(f' {Fore.BLUE}{url}{Style.RESET_ALL}')
 
-def run_cycle(excel_file: str, search_only: bool=False) -> int:
+def run_cycle(excel_file: str, search_only: bool = False, linkedin_only: bool = False) -> int:
     excel = ExcelJobLogger(excel_file)
     applied_ids, applied_companies = bootstrap_applied_ids(excel)
     if excel.filepath.exists():
@@ -325,7 +342,9 @@ def run_cycle(excel_file: str, search_only: bool=False) -> int:
     else:
         print(f' {Fore.CYAN}Excel: {excel_file} (created on first save){Style.RESET_ALL}')
     exit_code = 0
-    if ENABLE_NAUKRI:
+    run_naukri = ENABLE_NAUKRI and not linkedin_only
+    run_linkedin = ENABLE_LINKEDIN
+    if run_naukri:
         cookies_file = os.getenv('COOKIES_FILE', 'naukri_cookies.json')
         username = os.getenv('USERNAME') or os.getenv('NAUKRI_USERNAME')
         password = os.getenv('PASSWORD') or os.getenv('NAUKRI_PASSWORD')
@@ -361,7 +380,7 @@ def run_cycle(excel_file: str, search_only: bool=False) -> int:
                 print_summary('Naukri', len(entries), stats, excel_file)
             else:
                 print(f'\n{Fore.YELLOW}No matching Naukri jobs this cycle.{Style.RESET_ALL}')
-    if ENABLE_LINKEDIN:
+    if run_linkedin:
         from src.client.linkedin_client import LinkedInApplyClient
         li_cookies = os.getenv('LINKEDIN_COOKIES_FILE', LINKEDIN_COOKIES_FILE)
         li = LinkedInApplyClient(li_cookies, headless=LINKEDIN_HEADLESS)
@@ -369,7 +388,7 @@ def run_cycle(excel_file: str, search_only: bool=False) -> int:
         try:
             li.start()
             print(f' {Fore.GREEN}LinkedIn session ready{Style.RESET_ALL}')
-            li_entries = fetch_linkedin_jobs(li)
+            li_entries = fetch_linkedin_jobs(li, applied_ids)
             if search_only:
                 _print_search_only_jobs('LinkedIn', li_entries)
             else:
@@ -463,6 +482,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description='Naukri + LinkedIn auto-apply')
     parser.add_argument('--once', action='store_true', help='Run one cycle and exit (default: repeat every LOOP_INTERVAL_MINUTES)')
     parser.add_argument('--search-only', action='store_true', help='Search Naukri + LinkedIn only (no apply)')
+    parser.add_argument('--linkedin-only', action='store_true', help='LinkedIn DevOps/AWS Easy Apply only (skip Naukri)')
     args = parser.parse_args()
 
     excel_file = os.getenv("EXCEL_FILE", EXCEL_FILE)
@@ -470,14 +490,15 @@ def main() -> int:
 
     print_section("Auto-apply started")
     print(f" {Fore.WHITE}Platforms:{Style.RESET_ALL} Naukri={ENABLE_NAUKRI}, LinkedIn={ENABLE_LINKEDIN}")
-    print(f" {Fore.WHITE}Loop:{Style.RESET_ALL} {'once' if args.once else f'every {interval} minutes'}")
+    mode = 'search only' if args.search_only else 'LinkedIn DevOps/AWS only' if args.linkedin_only else 'once' if args.once else f'every {interval} minutes'
+    print(f' {Fore.WHITE}Mode:{Style.RESET_ALL} {mode}')
     print(f" {Fore.WHITE}Profile:{Style.RESET_ALL} 2yr exp, 30 days notice, relocate=yes, questions=yes")
 
     cycle = 0
     while True:
         cycle += 1
         print(f"\n{Fore.MAGENTA}{Style.BRIGHT}=== Cycle {cycle} @ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ==={Style.RESET_ALL}")
-        run_cycle(excel_file, search_only=args.search_only)
+        run_cycle(excel_file, search_only=args.search_only, linkedin_only=args.linkedin_only)
         if args.once:
             break
         print(f'\n{Fore.CYAN}Next run in {interval} minutes (Ctrl+C to stop)...{Style.RESET_ALL}')
