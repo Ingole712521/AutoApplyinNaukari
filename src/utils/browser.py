@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 from selenium import webdriver
-from selenium.common.exceptions import SessionNotCreatedException, WebDriverException
+from selenium.common.exceptions import NoSuchDriverException, SessionNotCreatedException, WebDriverException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 
@@ -15,6 +15,16 @@ try:
 except ImportError:
     USE_BRAVE_BROWSER = True
     BRAVE_BINARY_PATH = ''
+
+ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CHROMEDRIVER = ROOT / 'drivers' / 'chromedriver.exe'
+
+APP_CONTROL_HINT = (
+    'Windows blocked selenium-manager.exe (Application Control policy).\n'
+    'Fix: run  python scripts/setup_chromedriver.py\n'
+    'Then set in .env:  CHROMEDRIVER_PATH=drivers/chromedriver.exe\n'
+    '                 USE_BRAVE_BROWSER=false'
+)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -58,6 +68,24 @@ def find_chrome_binary() -> str | None:
     return None
 
 
+def find_chromedriver() -> str | None:
+    env_path = os.getenv('CHROMEDRIVER_PATH', '').strip()
+    if env_path:
+        path = Path(env_path)
+        if not path.is_absolute():
+            path = ROOT / path
+        if path.is_file():
+            return str(path.resolve())
+
+    if DEFAULT_CHROMEDRIVER.is_file():
+        return str(DEFAULT_CHROMEDRIVER.resolve())
+
+    which = shutil.which('chromedriver')
+    if which:
+        return which
+    return None
+
+
 def _build_options(*, binary: str | None, headless: bool, user_data_dir: str) -> Options:
     options = Options()
     if binary:
@@ -79,16 +107,38 @@ def _build_options(*, binary: str | None, headless: bool, user_data_dir: str) ->
     return options
 
 
+def _is_app_control_block(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return '4551' in text or 'application control' in text
+
+
 def _start_driver(options: Options) -> webdriver.Chrome:
-    service = Service(log_output=os.devnull)
-    return webdriver.Chrome(service=service, options=options)
+    chromedriver = find_chromedriver()
+    if chromedriver:
+        service = Service(executable_path=chromedriver, log_output=os.devnull)
+        return webdriver.Chrome(service=service, options=options)
+
+    try:
+        service = Service(log_output=os.devnull)
+        return webdriver.Chrome(service=service, options=options)
+    except (NoSuchDriverException, WebDriverException, OSError) as exc:
+        if _is_app_control_block(exc):
+            raise RuntimeError(APP_CONTROL_HINT) from exc
+        raise
 
 
 def create_webdriver(*, headless: bool = False) -> webdriver.Chrome:
     use_brave = _env_bool('USE_BRAVE_BROWSER', USE_BRAVE_BROWSER)
     user_data_dir = tempfile.mkdtemp(prefix='autoapply-browser-')
-    attempts: list[tuple[str, str | None]] = []
 
+    chromedriver = find_chromedriver()
+    if not chromedriver:
+        print(
+            'Note: No local chromedriver found. If login fails, run:\n'
+            '  python scripts/setup_chromedriver.py'
+        )
+
+    attempts: list[tuple[str, str | None]] = []
     if use_brave and find_brave_binary():
         attempts.append(('Brave', find_brave_binary()))
     attempts.append(('Chrome', find_chrome_binary()))
@@ -105,17 +155,22 @@ def create_webdriver(*, headless: bool = False) -> webdriver.Chrome:
             if browser_name == 'Chrome' and use_brave and find_brave_binary():
                 print('Using Google Chrome (Brave could not start).')
             return driver
-        except (SessionNotCreatedException, WebDriverException) as exc:
+        except (SessionNotCreatedException, WebDriverException, RuntimeError, OSError) as exc:
             last_error = exc
+            if isinstance(exc, RuntimeError) and 'Application Control' in str(exc):
+                shutil.rmtree(user_data_dir, ignore_errors=True)
+                raise
             hint = ''
             if browser_name == 'Brave':
-                hint = ' (often ChromeDriver/Brave version mismatch — set USE_BRAVE_BROWSER=false in .env to use Chrome only)'
+                hint = ' — set USE_BRAVE_BROWSER=false in .env'
             print(f'Warning: {browser_name} failed to start{hint}. Trying next browser...')
 
     shutil.rmtree(user_data_dir, ignore_errors=True)
+    if last_error and _is_app_control_block(last_error):
+        raise RuntimeError(APP_CONTROL_HINT) from last_error
     if last_error:
         raise last_error
-    raise RuntimeError('No Chromium browser found. Install Brave or Chrome, or set BRAVE_BINARY_PATH / CHROME_BINARY_PATH.')
+    raise RuntimeError('No Chromium browser found. Install Chrome or set CHROME_BINARY_PATH.')
 
 
 def quit_webdriver(driver: webdriver.Chrome | None) -> None:
