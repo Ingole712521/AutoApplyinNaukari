@@ -13,6 +13,7 @@ SKIP_JOB_STATUSES = frozenset({
     'Applied',
     'Skipped - Already Applied',
     'Skipped - External Apply',
+    'Failed',
 })
 
 

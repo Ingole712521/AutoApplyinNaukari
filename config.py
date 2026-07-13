@@ -22,6 +22,7 @@ def _env_int(name: str, default: int) -> int:
 
 LOOP_INTERVAL_MINUTES = _env_int('LOOP_INTERVAL_MINUTES', 30)
 ENABLE_NAUKRI = _env_bool('ENABLE_NAUKRI', True)
+ENABLE_NAUKRI_RECOMMENDED = _env_bool('ENABLE_NAUKRI_RECOMMENDED', True)
 ENABLE_LINKEDIN = _env_bool('ENABLE_LINKEDIN', not _IS_VERCEL)
 ENABLE_FOUNDIT = _env_bool('ENABLE_FOUNDIT', True)
 ENABLE_REMOTE_OK = _env_bool('ENABLE_REMOTE_OK', True)

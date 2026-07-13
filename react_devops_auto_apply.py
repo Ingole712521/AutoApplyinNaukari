@@ -13,6 +13,7 @@ from config import (
     ENABLE_FOUNDIT,
     ENABLE_LINKEDIN,
     ENABLE_NAUKRI,
+    ENABLE_NAUKRI_RECOMMENDED,
     ENABLE_REMOTIVE,
     ENABLE_REMOTE_OK,
     ENABLE_SURELY_REMOTE,
@@ -109,6 +110,28 @@ def fetch_naukri_jobs(jc: NaukriJobClient, applied_ids: set[str] | None = None) 
     results: list[tuple] = []
 
     known = applied_ids or set()
+
+    if ENABLE_NAUKRI_RECOMMENDED:
+        print_section(f'Naukri recommended jobs — skipping {len(known)} known IDs')
+        try:
+            rec_jobs = jc.get_recommended_jobs()
+            new_count = 0
+            for job in rec_jobs:
+                jid = normalize_job_id(job.job_id)
+                if not jid or jid in seen or jid in known:
+                    continue
+                seen.add(jid)
+                results.append((job, 'Recommended', 'recommended'))
+                new_count += 1
+            print(
+                f' {Fore.WHITE}[Recommended]{Style.RESET_ALL} '
+                f'{len(rec_jobs):>3} fetched, {Fore.GREEN}{new_count:>3} new{Style.RESET_ALL}'
+            )
+        except NaukriAuthError as exc:
+            print(f' {Fore.RED}[AUTH]{Style.RESET_ALL} recommended jobs: {exc}')
+        except Exception as exc:
+            print(f' {Fore.RED}[FAIL]{Style.RESET_ALL} recommended jobs: {exc}')
+
     print_section(
         f'Naukri search — {len(SEARCH_QUERIES)} queries, up to {MAX_PAGES_PER_QUERY} page(s), '
         f'{NAUKRI_RESULTS_PER_PAGE}/page, exp={EXPERIENCE_YEARS}yr, skipping {len(known)} known IDs'
@@ -144,7 +167,7 @@ def fetch_naukri_jobs(jc: NaukriJobClient, applied_ids: set[str] | None = None) 
                 if not title_matches_role(job.title):
                     continue
                 seen.add(jid)
-                results.append((job, keyword))
+                results.append((job, keyword, 'search'))
                 new_count += 1
             loc_label = location or 'All India'
             print(f' {Fore.WHITE}[{keyword[:28]:<28} | {loc_label[:12]:<12} | p{page}]{Style.RESET_ALL} {len(jobs):>3} fetched, {Fore.GREEN}{new_count:>3} new matches{Style.RESET_ALL}')
@@ -160,15 +183,24 @@ def apply_naukri_jobs(jc: NaukriJobClient, job_entries: list[tuple], applied_ids
         f'Naukri apply — {len(job_entries)} new jobs, '
         f'{len(applied_ids)} known applied IDs in memory'
     )
-    for index, (job, keyword) in enumerate(job_entries, start=1):
+    for index, entry in enumerate(job_entries, start=1):
+        if len(entry) == 3:
+            job, keyword, source = entry
+        else:
+            job, keyword = entry
+            source = 'search'
         print(f'\n{LINE}')
         print(f' {Fore.CYAN}{Style.BRIGHT}[{index}/{len(job_entries)}]{Style.RESET_ALL} {Style.BRIGHT}{job.title}{Style.RESET_ALL}')
         print(f' {Fore.WHITE}Company:{Style.RESET_ALL} {Fore.YELLOW}{job.company}{Style.RESET_ALL}')
+        print(f' {Fore.WHITE}Source:{Style.RESET_ALL} {keyword}')
         if _skip_already_applied(job, keyword, applied_ids, excel, stats):
             continue
         if should_skip_company(excel, job.company, applied_companies):
             print(f' {Fore.WHITE}Skipped — company already applied{Style.RESET_ALL}')
             excel.append_job(job, keyword, status='Skipped - Company Applied', notes='Applied to this company earlier', platform='Naukri')
+            jid = normalize_job_id(job.job_id)
+            if jid:
+                applied_ids.add(jid)
             stats['skipped_company'] += 1
             continue
         if jc.is_external_apply(job.job_id):
@@ -176,6 +208,9 @@ def apply_naukri_jobs(jc: NaukriJobClient, job_entries: list[tuple], applied_ids
             print(f' {Fore.YELLOW}External apply — URL saved to Excel{Style.RESET_ALL}')
             print(f' {Fore.BLUE}{external_url}{Style.RESET_ALL}')
             excel.append_job(job, keyword, status='Skipped - External Apply', notes='Apply on company website (URL saved)', platform='Naukri', external_apply_url=external_url)
+            jid = normalize_job_id(job.job_id)
+            if jid:
+                applied_ids.add(jid)
             stats['skipped_external'] += 1
             continue
         mandatory = job.tags[:2] if job.tags else []
@@ -183,14 +218,14 @@ def apply_naukri_jobs(jc: NaukriJobClient, job_entries: list[tuple], applied_ids
         try:
             sid = datetime.utcnow().strftime('%Y%m%d%H%M%S') + '0000000'
             result = jc.apply_job(
-                job, mandatory_skills=mandatory, optional_skills=optional, sid=sid, source='search',
+                job, mandatory_skills=mandatory, optional_skills=optional, sid=sid, source=source,
             )
             job_result = (result.get('jobs') or [{}])[0]
             if job_result.get('questionnaire'):
                 print(f' {Fore.CYAN}Questionnaire — auto-filling{Style.RESET_ALL}')
                 result = jc.handle_static_questionnaire_and_apply(
                     job, questionnaire=job_result['questionnaire'], sid=sid,
-                    mandatory_skills=mandatory, optional_skills=optional, source='search',
+                    mandatory_skills=mandatory, optional_skills=optional, source=source,
                 )
             ok, msg, already_on_naukri = jc.parse_apply_result(result, normalize_job_id(job.job_id))
             if not ok:
@@ -218,6 +253,9 @@ def apply_naukri_jobs(jc: NaukriJobClient, job_entries: list[tuple], applied_ids
         except Exception as exc:
             print(f' {Fore.RED}Failed — {exc}{Style.RESET_ALL}')
             excel.append_job(job, keyword, status='Failed', notes=str(exc), platform='Naukri')
+            jid = normalize_job_id(job.job_id)
+            if jid:
+                applied_ids.add(jid)
             stats['failed'] += 1
         time.sleep(APPLY_DELAY_SEC)
     return stats
@@ -324,7 +362,11 @@ def _print_search_only_jobs(platform: str, entries: list[tuple]) -> None:
     if not entries:
         print(f' {Fore.YELLOW}No matching jobs.{Style.RESET_ALL}')
         return
-    for index, (job, keyword) in enumerate(entries, start=1):
+    for index, entry in enumerate(entries, start=1):
+        if len(entry) == 3:
+            job, keyword, _source = entry
+        else:
+            job, keyword = entry
         print(f' {Fore.CYAN}[{index}]{Style.RESET_ALL} {Style.BRIGHT}{job.title}{Style.RESET_ALL} @ {Fore.YELLOW}{job.company}{Style.RESET_ALL}')
         print(f' {Fore.WHITE}Query:{Style.RESET_ALL} {keyword}')
         url = getattr(job, 'apply_link', None) or getattr(job, 'job_url', '')

@@ -291,7 +291,6 @@ class NaukriJobClient:
             raise NaukriParseError(f'Recommended jobs fetch failed: {res.status_code}')
         data = res.json()
         raw_jobs = data.get('jobDetails') or []
-        print(raw_jobs[:5])
         return [self._parse_job(j) for j in raw_jobs]
 
     def search_jobs(self, keyword: str, location: str='', page: int=2, job_age: int=3, experience: int=2, results_per_page: int=20, lat_long: str='') -> list[Job]:
