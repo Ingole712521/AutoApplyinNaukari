@@ -17,6 +17,7 @@ naukri_cookies.json
 linkedin_cookies.json
 naukri_jobs.xlsx
 job_applications.xlsx
+.browser-profiles/
 
 .DS_Store
 Thumbs.db

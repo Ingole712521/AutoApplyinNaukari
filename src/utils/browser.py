@@ -102,8 +102,24 @@ def _build_options(*, binary: str | None, headless: bool, user_data_dir: str) ->
     options.add_argument('--no-sandbox')
     options.add_argument('--remote-debugging-port=0')
     options.add_argument(f'--user-data-dir={user_data_dir}')
+    # Google OAuth often hangs on a white page when Brave Shields / fingerprinting
+    # block third-party cookies and redirect callbacks after phone approval.
+    options.add_argument(
+        '--disable-features=IsolateOrigins,site-per-process,'
+        'BraveAdblockCookieListDefault,BraveDarkModeBlock'
+    )
+    options.add_argument('--disable-site-isolation-trials')
     options.add_experimental_option('excludeSwitches', ['enable-automation'])
     options.add_experimental_option('useAutomationExtension', False)
+    options.add_experimental_option(
+        'prefs',
+        {
+            'credentials_enable_service': False,
+            'profile.password_manager_enabled': False,
+            'profile.default_content_setting_values.notifications': 2,
+            'profile.cookie_controls_mode': 0,
+        },
+    )
     return options
 
 
@@ -127,9 +143,22 @@ def _start_driver(options: Options) -> webdriver.Chrome:
         raise
 
 
-def create_webdriver(*, headless: bool = False) -> webdriver.Chrome:
+def create_webdriver(
+    *,
+    headless: bool = False,
+    persistent_profile: str | None = None,
+) -> webdriver.Chrome:
     use_brave = _env_bool('USE_BRAVE_BROWSER', USE_BRAVE_BROWSER)
-    user_data_dir = tempfile.mkdtemp(prefix='autoapply-browser-')
+    keep_profile = False
+    if persistent_profile:
+        profile_path = Path(persistent_profile)
+        if not profile_path.is_absolute():
+            profile_path = ROOT / profile_path
+        profile_path.mkdir(parents=True, exist_ok=True)
+        user_data_dir = str(profile_path.resolve())
+        keep_profile = True
+    else:
+        user_data_dir = tempfile.mkdtemp(prefix='autoapply-browser-')
 
     chromedriver = find_chromedriver()
     if not chromedriver:
@@ -152,20 +181,35 @@ def create_webdriver(*, headless: bool = False) -> webdriver.Chrome:
             driver = _start_driver(options)
             driver._auto_apply_browser = browser_name
             driver._auto_apply_profile_dir = user_data_dir
+            driver._auto_apply_keep_profile = keep_profile
+            try:
+                driver.execute_cdp_cmd(
+                    'Page.addScriptToEvaluateOnNewDocument',
+                    {
+                        'source': (
+                            'Object.defineProperty(navigator, "webdriver", '
+                            '{get: () => undefined});'
+                        ),
+                    },
+                )
+            except Exception:
+                pass
             if browser_name == 'Chrome' and use_brave and find_brave_binary():
                 print('Using Google Chrome (Brave could not start).')
             return driver
         except (SessionNotCreatedException, WebDriverException, RuntimeError, OSError) as exc:
             last_error = exc
             if isinstance(exc, RuntimeError) and 'Application Control' in str(exc):
-                shutil.rmtree(user_data_dir, ignore_errors=True)
+                if not keep_profile:
+                    shutil.rmtree(user_data_dir, ignore_errors=True)
                 raise
             hint = ''
             if browser_name == 'Brave':
                 hint = ' — set USE_BRAVE_BROWSER=false in .env'
             print(f'Warning: {browser_name} failed to start{hint}. Trying next browser...')
 
-    shutil.rmtree(user_data_dir, ignore_errors=True)
+    if not keep_profile:
+        shutil.rmtree(user_data_dir, ignore_errors=True)
     if last_error and _is_app_control_block(last_error):
         raise RuntimeError(APP_CONTROL_HINT) from last_error
     if last_error:
@@ -177,11 +221,12 @@ def quit_webdriver(driver: webdriver.Chrome | None) -> None:
     if driver is None:
         return
     profile_dir = getattr(driver, '_auto_apply_profile_dir', None)
+    keep_profile = getattr(driver, '_auto_apply_keep_profile', False)
     try:
         driver.quit()
     except Exception:
         pass
-    if profile_dir:
+    if profile_dir and not keep_profile:
         shutil.rmtree(profile_dir, ignore_errors=True)
 
 

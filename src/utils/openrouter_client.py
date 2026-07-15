@@ -24,7 +24,19 @@ def answer_application_question(question: str, options: list[str] | None, profil
     options_text = ''
     if options:
         options_text = 'Options:\n' + '\n'.join((f'- {o}' for o in options))
-    profile_text = f"Years of experience: {profile.get('exp_total', '2')}\nNotice period (days): {profile.get('notice_days', 30)}\nWilling to relocate: {('Yes' if profile.get('willing_to_relocate') else 'No')}\nCurrent location: {profile.get('current_location', 'Pune')}\nDefault for yes/no screening questions: Yes\n"
+    profile_text = (
+        f"Years of experience (including every skill-specific experience field): {profile.get('exp_total', '3')}\n"
+        f"Notice period (days): {profile.get('notice_days', 30)}\n"
+        f"Willing to relocate: {('Yes' if profile.get('willing_to_relocate') else 'No')}\n"
+        f"Current location: {profile.get('current_location', 'Pune')}\n"
+        f"Legally authorized to work: {('Yes' if profile.get('legally_authorized_to_work', True) else 'No')}\n"
+        f"Currently has a work visa: {('Yes' if profile.get('has_current_work_visa', False) else 'No')}\n"
+        f"Requires visa sponsorship now: {('Yes' if profile.get('require_visa_sponsorship_now', False) else 'No')}\n"
+        f"Requires visa sponsorship in the future: {('Yes' if profile.get('require_visa_sponsorship_future', True) else 'No')}\n"
+        f"Previously worked for the hiring company: {('Yes' if profile.get('previously_worked_for_company', False) else 'No')}\n"
+        f"Previously interviewed with the hiring company: {('Yes' if profile.get('previously_interviewed_with_company', False) else 'No')}\n"
+        "For any unspecified yes/no question, answer Yes.\n"
+    )
     system = 'You fill job application forms. Reply with ONLY the exact answer text to enter or the exact option label to choose. No explanation.'
     user = f'Applicant profile:\n{profile_text}\n\nQuestion:\n{question}\n\n{options_text}\n\nAnswer:'
     try:

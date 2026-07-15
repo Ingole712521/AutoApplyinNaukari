@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime
 from src.models.models import Job
 from src.client.naukri_client import NaukriLoginClient
@@ -233,13 +234,50 @@ class NaukriJobClient:
                     if loc in v.lower():
                         return k
                 return list(options.keys())[0]
+
+            def pick_experience(options: dict, years: str) -> str:
+                for k, v in options.items():
+                    if re.search(rf'(?<!\d){re.escape(str(years))}(?!\d)', v):
+                        return k
+                return list(options.keys())[0]
+
+            def profile_yes_no(qtext: str) -> bool | None:
+                prior_employment = (
+                    'worked for this company', 'worked at this company', 'worked with us',
+                    'worked here', 'employed by this company', 'previously employed',
+                    'former employee',
+                )
+                prior_interview = (
+                    'interviewed with this company', 'interviewed at this company',
+                    'interviewed by this company', 'interviewed with us', 'interviewed here',
+                )
+                if any(x in qtext for x in prior_employment):
+                    return bool(profile.get('previously_worked_for_company', False))
+                if any(x in qtext for x in prior_interview):
+                    return bool(profile.get('previously_interviewed_with_company', False))
+                if 'sponsor' in qtext or 'sponsorship' in qtext:
+                    if 'now' in qtext and not any(x in qtext for x in ('future', 'later', 'eventually')):
+                        return bool(profile.get('require_visa_sponsorship_now', False))
+                    return bool(profile.get('require_visa_sponsorship_future', True))
+                if 'visa' in qtext:
+                    if any(x in qtext for x in ('have a', 'hold a', 'current', 'currently', 'valid visa')):
+                        return bool(profile.get('has_current_work_visa', False))
+                    if any(x in qtext for x in ('need', 'require', 'future')):
+                        return bool(profile.get('require_visa_sponsorship_future', True))
+                if any(x in qtext for x in ('legally authorized', 'legally authorised', 'authorized to work', 'authorised to work', 'eligible to work')):
+                    return bool(profile.get('legally_authorized_to_work', True))
+                return None
+
             for q in questionnaire:
                 qid = q['questionId']
                 qtext = (q.get('questionName') or '').lower()
                 qtype = (q.get('questionType') or '').lower()
                 options = q.get('answerOption') or {}
+                explicit_yes_no = profile_yes_no(qtext)
                 if qtype == 'text box':
-                    if 'current ctc' in qtext or 'current salary' in qtext:
+                    if explicit_yes_no is not None:
+                        ans = 'Yes' if explicit_yes_no else 'No'
+                    elif 'current ctc' in qtext or 'current salary' in qtext:
                         ans = salary_answer(qtext, profile, 'current')
                     elif 'expected ctc' in qtext or 'expected salary' in qtext:
                         ans = salary_answer(qtext, profile, 'expected')
@@ -252,7 +290,11 @@ class NaukriJobClient:
                     else:
                         ans = profile['exp_total']
                 elif options:
-                    if 'relocate' in qtext or 'relocation' in qtext or 'willing to move' in qtext:
+                    if explicit_yes_no is not None:
+                        key = pick_yes(options) if explicit_yes_no else pick_no(options)
+                    elif 'experience' in qtext or 'years' in qtext:
+                        key = pick_experience(options, profile['exp_total'])
+                    elif 'relocate' in qtext or 'relocation' in qtext or 'willing to move' in qtext:
                         key = pick_yes(options) if profile.get('willing_to_relocate') else pick_no(options)
                     elif 'notice' in qtext:
                         key = pick_notice(options, profile['notice_days'])

@@ -204,10 +204,14 @@ def apply_naukri_jobs(jc: NaukriJobClient, job_entries: list[tuple], applied_ids
             stats['skipped_company'] += 1
             continue
         if jc.is_external_apply(job.job_id):
-            external_url = jc.get_external_apply_url(job.job_id)
-            print(f' {Fore.YELLOW}External apply — URL saved to Excel{Style.RESET_ALL}')
-            print(f' {Fore.BLUE}{external_url}{Style.RESET_ALL}')
-            excel.append_job(job, keyword, status='Skipped - External Apply', notes='Apply on company website (URL saved)', platform='Naukri', external_apply_url=external_url)
+            print(f' {Fore.YELLOW}External redirect — not opening or saving the company URL{Style.RESET_ALL}')
+            print(f' {Fore.WHITE}Position:{Style.RESET_ALL} {job.title}')
+            print(f' {Fore.WHITE}Company:{Style.RESET_ALL} {job.company}')
+            excel.append_job(
+                job, keyword, status='Skipped - External Apply',
+                notes=f'External redirect; position={job.title}; company={job.company}; URL intentionally not saved',
+                platform='Naukri',
+            )
             jid = normalize_job_id(job.job_id)
             if jid:
                 applied_ids.add(jid)
@@ -265,7 +269,7 @@ def fetch_linkedin_jobs(li, applied_ids: set[str] | None = None) -> list[tuple]:
     seen: set[str] = set()
     known = applied_ids or set()
     print_section(
-        f'LinkedIn DevOps/AWS — {len(LINKEDIN_SEARCH_QUERIES)} keywords, '
+        f'LinkedIn React/Cloud/DevOps — {len(LINKEDIN_SEARCH_QUERIES)} keywords, '
         f'up to {LINKEDIN_MAX_JOBS_PER_QUERY} Easy Apply jobs each'
     )
     for keyword in LINKEDIN_SEARCH_QUERIES:
@@ -289,9 +293,9 @@ def fetch_linkedin_jobs(li, applied_ids: set[str] | None = None) -> list[tuple]:
             seen.add(jid)
             all_jobs.append((job, keyword))
             new += 1
-        print(f' {Fore.WHITE}[{keyword[:40]:<40}]{Style.RESET_ALL} {len(jobs):>3} listed, {Fore.GREEN}{new:>3} DevOps/AWS matches{Style.RESET_ALL}')
+        print(f' {Fore.WHITE}[{keyword[:40]:<40}]{Style.RESET_ALL} {len(jobs):>3} listed, {Fore.GREEN}{new:>3} matching roles{Style.RESET_ALL}')
         time.sleep(SEARCH_DELAY_SEC)
-    print(f'\n {Fore.CYAN}LinkedIn DevOps/AWS jobs to apply: {Style.BRIGHT}{len(all_jobs)}{Style.RESET_ALL}')
+    print(f'\n {Fore.CYAN}LinkedIn matching jobs to apply: {Style.BRIGHT}{len(all_jobs)}{Style.RESET_ALL}')
     return all_jobs
 
 def apply_linkedin_jobs(li, excel: ExcelJobLogger, applied_ids: set[str], applied_companies: set[str], job_entries: list[tuple] | None=None) -> dict:
@@ -352,7 +356,7 @@ def apply_linkedin_jobs(li, excel: ExcelJobLogger, applied_ids: set[str], applie
 
 def print_summary(platform: str, total: int, stats: dict, excel_file: str) -> None:
     print_section(f'{platform} run summary')
-    rows = [('Jobs matched', total, Fore.WHITE), ('Already applied (skipped)', stats['skipped_applied'], Fore.WHITE), ('Company already applied', stats.get('skipped_company', 0), Fore.WHITE), ('Applied this run', stats['applied'], Fore.GREEN), ('External (URL in Excel)', stats['skipped_external'], Fore.YELLOW), ('Failed', stats['failed'], Fore.RED), ('Excel file', excel_file, Fore.CYAN)]
+    rows = [('Jobs matched', total, Fore.WHITE), ('Already applied (skipped)', stats['skipped_applied'], Fore.WHITE), ('Company already applied', stats.get('skipped_company', 0), Fore.WHITE), ('Applied this run', stats['applied'], Fore.GREEN), ('External redirects', stats['skipped_external'], Fore.YELLOW), ('Failed', stats['failed'], Fore.RED), ('Excel file', excel_file, Fore.CYAN)]
     for label, value, color in rows:
         print(f' {Fore.WHITE}{label:<32}{Style.RESET_ALL} {color}{value}{Style.RESET_ALL}')
     print(LINE)

@@ -39,7 +39,9 @@ EXTERNAL_BOARD_KEYWORDS = [
 ]
 FOUNDIT_MAX_PAGES = 2 if _IS_VERCEL else 5
 
-SKIP_IF_COMPANY_ALREADY_APPLIED = _env_bool('SKIP_IF_COMPANY_ALREADY_APPLIED', True)
+# Apply to different matching roles at the same company. Exact job IDs are still
+# de-duplicated from Excel, CSV, Naukri history, and LinkedIn's applied marker.
+SKIP_IF_COMPANY_ALREADY_APPLIED = _env_bool('SKIP_IF_COMPANY_ALREADY_APPLIED', False)
 NAUKRI_LOCATION = os.getenv('NAUKRI_LOCATION', '')
 
 SEARCH_QUERIES = [
@@ -66,7 +68,7 @@ TITLE_KEYWORDS = [
     'infrastructure', 'linux',
 ]
 
-EXPERIENCE_YEARS = _env_int('EXPERIENCE_YEARS', 2)
+EXPERIENCE_YEARS = _env_int('EXPERIENCE_YEARS', 3)
 JOB_AGE_DAYS = _env_int('JOB_AGE_DAYS', 14)
 MAX_PAGES_PER_QUERY = _env_int('MAX_PAGES_PER_QUERY', 3 if _IS_VERCEL else 10)
 PAGES_PER_QUERY = MAX_PAGES_PER_QUERY
@@ -82,8 +84,16 @@ LINKEDIN_LOCATION = os.getenv('LINKEDIN_LOCATION', 'India')
 LINKEDIN_MAX_JOBS_PER_QUERY = _env_int('LINKEDIN_MAX_JOBS_PER_QUERY', 50)
 LINKEDIN_SCROLL_ROUNDS = _env_int('LINKEDIN_SCROLL_ROUNDS', 15)
 
-# LinkedIn: DevOps + AWS only (Easy Apply filter f_AL=true is set in linkedin_client)
+# LinkedIn matching roles (Easy Apply filter f_AL=true is set in linkedin_client)
 LINKEDIN_SEARCH_QUERIES = [
+    'React Developer',
+    'React.js Developer',
+    'Frontend Developer React',
+    'Frontend Engineer React',
+    'React Native Developer',
+    'Full Stack Developer React',
+    'JavaScript Developer',
+    'TypeScript Developer',
     'DevOps Engineer',
     'DevOps',
     'Senior DevOps Engineer',
@@ -106,8 +116,10 @@ LINKEDIN_SEARCH_QUERIES = [
     'Linux DevOps',
 ]
 
-# Match job title before applying on LinkedIn (DevOps / AWS / cloud stack only)
+# Match React/frontend and DevOps/cloud job titles before applying on LinkedIn.
 LINKEDIN_TITLE_KEYWORDS = [
+    'react', 'reactjs', 'react.js', 'react native', 'frontend', 'front-end',
+    'full stack', 'full-stack', 'javascript developer', 'typescript developer',
     'devops', 'dev ops', 'sre', 'site reliability', 'platform engineer',
     'cloud', 'aws', 'amazon web services', 'azure', 'gcp',
     'kubernetes', 'k8s', 'docker', 'terraform', 'ansible', 'ci/cd', 'cicd',
@@ -124,9 +136,15 @@ OPENROUTER_MODEL = 'openai/gpt-oss-120b:free'
 APPLICANT_PROFILE = {
     'current_ctc_annual': 168000,
     'expected_ctc_annual': 500000,
-    'exp_total': '2',
+    'exp_total': '3',
     'current_location': 'Pune',
     'willing_to_relocate': True,
+    'legally_authorized_to_work': True,
+    'has_current_work_visa': False,
+    'require_visa_sponsorship_now': False,
+    'require_visa_sponsorship_future': True,
+    'previously_worked_for_company': False,
+    'previously_interviewed_with_company': False,
     'notice_days': 30,
     'skills': [
         'react', 'javascript', 'typescript', 'redux', 'aws', 'cloud', 'devops',

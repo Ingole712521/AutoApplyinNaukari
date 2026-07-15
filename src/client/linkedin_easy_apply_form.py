@@ -267,10 +267,18 @@ class LinkedInEasyApplyForm:
     def _answer_for_question(self, question: str, options: list[str] | None=None, field_type: str='text') -> str:
         q = (question or '').lower()
         p = self.profile
+        explicit_yes_no = self._profile_yes_no_answer(q)
+        if explicit_yes_no is not None:
+            answer = 'Yes' if explicit_yes_no else 'No'
+            if options:
+                for opt in options:
+                    if answer.lower() in opt.lower():
+                        return opt
+            return answer
         if any((x in q for x in ('notice', 'serving notice'))):
             return str(p.get('notice_days', 30))
         if any((x in q for x in ('experience', 'years of experience', 'how many years'))):
-            return str(p.get('exp_total', '2'))
+            return str(p.get('exp_total', '3'))
         if any((x in q for x in ('relocate', 'relocation', 'willing to move'))):
             return 'Yes' if p.get('willing_to_relocate') else 'No'
         if any((x in q for x in ('location', 'city', 'where do you live', 'based'))):
@@ -288,7 +296,7 @@ class LinkedInEasyApplyForm:
                         return opt
             if 'experience' in q or 'year' in q:
                 for opt in options:
-                    if p.get('exp_total', '2') in opt:
+                    if p.get('exp_total', '3') in opt:
                         return opt
         ai = answer_application_question(question or 'Application question', options, p)
         if ai:
@@ -304,21 +312,51 @@ class LinkedInEasyApplyForm:
                     if 'yes' in opt.lower():
                         return opt
             return options[0] if options else 'Yes'
-        return str(p.get('exp_total', '2'))
+        return str(p.get('exp_total', '3'))
 
     def _should_answer_yes(self, text: str) -> bool:
         t = (text or '').lower()
+        explicit = self._profile_yes_no_answer(t)
+        if explicit is not None:
+            return explicit
         if any((x in t for x in ('relocate', 'relocation'))):
             return bool(self.profile.get('willing_to_relocate'))
-        if any((x in t for x in ('authorized', 'sponsor', 'visa', 'legally'))):
-            return True
         if 'no' in t and 'yes' not in t:
             return False
         return True
 
+    def _profile_yes_no_answer(self, text: str) -> bool | None:
+        t = (text or '').lower()
+        p = self.profile
+        prior_employment = (
+            'worked for this company', 'worked at this company', 'worked with us',
+            'worked here', 'employed by this company', 'previously employed',
+            'former employee',
+        )
+        prior_interview = (
+            'interviewed with this company', 'interviewed at this company',
+            'interviewed by this company', 'interviewed with us', 'interviewed here',
+        )
+        if any(x in t for x in prior_employment):
+            return bool(p.get('previously_worked_for_company', False))
+        if any(x in t for x in prior_interview):
+            return bool(p.get('previously_interviewed_with_company', False))
+        if any(x in t for x in ('sponsor', 'sponsorship')):
+            if 'now' in t and not any(x in t for x in ('future', 'later', 'eventually')):
+                return bool(p.get('require_visa_sponsorship_now', False))
+            return bool(p.get('require_visa_sponsorship_future', True))
+        if 'visa' in t:
+            if any(x in t for x in ('have a', 'hold a', 'current', 'currently', 'valid visa')):
+                return bool(p.get('has_current_work_visa', False))
+            if any(x in t for x in ('need', 'require', 'future')):
+                return bool(p.get('require_visa_sponsorship_future', True))
+        if any(x in t for x in ('legally authorized', 'legally authorised', 'authorized to work', 'authorised to work', 'eligible to work')):
+            return bool(p.get('legally_authorized_to_work', True))
+        return None
+
     def _preference_tokens(self, answer_l: str) -> tuple[str, ...]:
         p = self.profile
-        tokens = [answer_l, str(p.get('exp_total', '2')), 'yes', '30', '1 month']
+        tokens = [answer_l, str(p.get('exp_total', '3')), 'yes', '30', '1 month']
         if p.get('willing_to_relocate'):
             tokens.append('yes')
         return tuple(tokens)
